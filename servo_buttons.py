@@ -100,7 +100,7 @@ angle = 0.0
 minimum_angle = -90.0
 maximum_angle = 90.0
 
-movement_speed = 120.0
+movement_speed = 180.0
 update_interval = 0.02
 movement_step = movement_speed * update_interval
 
