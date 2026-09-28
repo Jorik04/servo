@@ -100,10 +100,11 @@ angle = 0.0
 minimum_angle = -90.0
 maximum_angle = 90.0
 
-movement_speed = 180.0
-update_interval = 0.02
+movement_speed = 360.0
+update_interval = 0.01
 movement_step = movement_speed * update_interval
 
+last_loop_time = monotonic()
 last_oled_update = 0.0
 
 servo.angle = angle
@@ -119,6 +120,11 @@ print("Press Ctrl+C to stop")
 
 try:
     while True:
+        current_time = monotonic()
+        elapsed = current_time - last_loop_time
+        last_loop_time = current_time
+
+        movement_speed = movement_speed + elapsed
         moved = False
 
         if left_button.is_pressed and not right_button.is_pressed:
@@ -156,13 +162,10 @@ try:
                 flush=True
             )
 
-            # Update OLED no more than 10 times per second
-            current_time = monotonic()
-
-            if current_time - last_oled_update >= 0.1:
+            if current_time - last_oled_update >= 0.2:
                 display_angle(angle)
                 last_oled_update = current_time
-
+                
         sleep(update_interval)
 
 
