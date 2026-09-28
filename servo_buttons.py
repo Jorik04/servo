@@ -1,4 +1,5 @@
-from time import monotonic, sleep
+from signal import pause
+from threading import Lock
 
 from gpiozero import AngularServo, Button
 from gpiozero.pins.pigpio import PiGPIOFactory
@@ -7,11 +8,14 @@ from luma.core.render import canvas
 from luma.oled.device import ssd1306
 
 
-# --------------------------------------------------
+# ==================================================
 # OLED setup
-# --------------------------------------------------
+# ==================================================
 
-oled_serial = i2c(port=1, address=0x3C)
+oled_serial = i2c(
+    port=1,
+    address=0x3C
+)
 
 oled = ssd1306(
     oled_serial,
@@ -19,159 +23,172 @@ oled = ssd1306(
     height=64
 )
 
+display_lock = Lock()
+
 
 def display_angle(angle):
-    marker = int((angle + 90) / 180 * 127)
+    """
+    Display the requested target angle on the OLED.
+    """
+
+    # Convert -90...+90 into OLED position 2...125
+    marker = int((angle + 90) / 180 * 123) + 2
     marker = max(2, min(125, marker))
 
-    with canvas(oled) as draw:
-        draw.text(
-            (18, 5),
-            "SERVO ANGLE",
-            fill="white"
-        )
+    with display_lock:
+        with canvas(oled) as draw:
+            draw.text(
+                (18, 5),
+                "SERVO ANGLE",
+                fill="white"
+            )
 
-        draw.text(
-            (38, 27),
-            f"{angle:+.0f} deg",
-            fill="white"
-        )
+            draw.text(
+                (40, 27),
+                f"{angle:+.0f} deg",
+                fill="white"
+            )
 
-        # Angle indicator
-        draw.line(
-            (2, 55, 125, 55),
-            fill="white"
-        )
+            # Angle indicator line
+            draw.line(
+                (2, 55, 125, 55),
+                fill="white"
+            )
 
-        draw.line(
-            (64, 51, 64, 59),
-            fill="white"
-        )
+            # Centre marker
+            draw.line(
+                (64, 51, 64, 59),
+                fill="white"
+            )
 
-        draw.rectangle(
-            (marker - 2, 52, marker + 2, 58),
-            fill="white"
-        )
+            # Current target marker
+            draw.rectangle(
+                (marker - 2, 52, marker + 2, 58),
+                fill="white"
+            )
 
 
-# --------------------------------------------------
-# GPIO and servo setup
-# --------------------------------------------------
+# ==================================================
+# Pigpio setup
+# ==================================================
 
-factory = PiGPIOFactory(host="localhost")
+factory = PiGPIOFactory(
+    host="localhost"
+)
 
+
+# ==================================================
+# Servo setup
+# ==================================================
+
+# Servo signal:
+# GPIO18, physical pin 12
 servo = AngularServo(
-    18,                          # Physical pin 12
+    18,
     pin_factory=factory,
     min_angle=-90,
     max_angle=90,
     min_pulse_width=0.001,
-    max_pulse_width=0.002
+    max_pulse_width=0.002,
+    initial_angle=0
 )
 
+
+# ==================================================
+# Button setup
+# ==================================================
+
+# Left button:
+# GPIO17, physical pin 11
 left_button = Button(
-    17,                          # Physical pin 11
+    17,
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.03
+    bounce_time=0.05
 )
 
+# Right button:
+# GPIO27, physical pin 13
 right_button = Button(
-    27,                          # Physical pin 13
+    27,
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.03
+    bounce_time=0.05
 )
 
+# Centre button:
+# GPIO22, physical pin 15
 centre_button = Button(
-    22,                          # Physical pin 15
+    22,
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.03
+    bounce_time=0.05
 )
 
 
-# --------------------------------------------------
-# Movement settings
-# --------------------------------------------------
+# ==================================================
+# Button actions
+# ==================================================
 
-angle = 0.0
+target_angle = 0
 
-minimum_angle = -90.0
-maximum_angle = 90.0
 
-movement_speed = 360.0
-update_interval = 0.01
-movement_step = movement_speed * update_interval
+def move_to(angle):
+    """
+    Send one target position to the servo.
 
-last_loop_time = monotonic()
-last_oled_update = 0.0
+    The servo's internal controller performs the
+    movement smoothly at its natural speed.
+    """
 
-servo.angle = angle
-display_angle(angle)
+    global target_angle
 
-print("Servo and OLED controller started")
+    target_angle = angle
+    servo.angle = angle
+
+    print(f"Moving to {angle:+.0f} degrees")
+    display_angle(angle)
+
+
+def move_left():
+    move_to(-90)
+
+
+def move_right():
+    move_to(90)
+
+
+def move_centre():
+    move_to(0)
+
+
+left_button.when_pressed = move_left
+right_button.when_pressed = move_right
+centre_button.when_pressed = move_centre
+
+
+# ==================================================
+# Start controller
+# ==================================================
+
+display_angle(0)
+
+print("Servo controller started")
+print("LEFT   GPIO17: move to -90 degrees")
+print("RIGHT  GPIO27: move to +90 degrees")
+print("CENTRE GPIO22: move to 0 degrees")
 print("Press Ctrl+C to stop")
 
 
-# --------------------------------------------------
-# Main loop
-# --------------------------------------------------
+# ==================================================
+# Keep program running
+# ==================================================
 
 try:
-    while True:
-        current_time = monotonic()
-        elapsed = current_time - last_loop_time
-        last_loop_time = current_time
-
-        movement_speed = movement_speed + elapsed
-        moved = False
-
-        if left_button.is_pressed and not right_button.is_pressed:
-            angle = max(
-                minimum_angle,
-                angle - movement_step
-            )
-            moved = True
-
-        elif right_button.is_pressed and not left_button.is_pressed:
-            angle = min(
-                maximum_angle,
-                angle + movement_step
-            )
-            moved = True
-
-        elif centre_button.is_pressed:
-            if angle > movement_step:
-                angle -= movement_step
-
-            elif angle < -movement_step:
-                angle += movement_step
-
-            else:
-                angle = 0.0
-
-            moved = True
-
-        if moved:
-            servo.angle = angle
-
-            print(
-                f"\rAngle: {angle:6.1f}°",
-                end="",
-                flush=True
-            )
-
-            if current_time - last_oled_update >= 0.2:
-                display_angle(angle)
-                last_oled_update = current_time
-                
-        sleep(update_interval)
-
+    pause()
 
 except KeyboardInterrupt:
     print("\nController stopped")
-
 
 finally:
     servo.detach()
