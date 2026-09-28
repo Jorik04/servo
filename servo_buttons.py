@@ -4,13 +4,10 @@ from gpiozero import AngularServo, Button
 from gpiozero.pins.pigpio import PiGPIOFactory
 
 
-# Connect to the pigpio daemon
 factory = PiGPIOFactory(host="localhost")
 
-
-# Servo signal: GPIO18, physical pin 12
 servo = AngularServo(
-    18,
+    18,                          # Physical pin 12
     pin_factory=factory,
     min_angle=-90,
     max_angle=90,
@@ -18,64 +15,77 @@ servo = AngularServo(
     max_pulse_width=0.002
 )
 
-
-# Buttons connect between their GPIO and GND
 left_button = Button(
-    17,                     # Physical pin 11
+    17,                          # Physical pin 11
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.05
+    bounce_time=0.03
 )
 
 right_button = Button(
-    27,                     # Physical pin 13
+    27,                          # Physical pin 13
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.05
+    bounce_time=0.03
 )
 
 centre_button = Button(
-    22,                     # Physical pin 15
+    22,                          # Physical pin 15
     pin_factory=factory,
     pull_up=True,
-    bounce_time=0.05
+    bounce_time=0.03
 )
 
 
-# Movement settings
-angle = 0
-minimum_angle = -45
-maximum_angle = 45
-movement_step = 1
+angle = 0.0
+
+minimum_angle = -90.0
+maximum_angle = 90.0
+
+# Movement configuration
+movement_speed = 120.0     # Degrees per second
+update_interval = 0.02     # 50 updates per second
+movement_step = movement_speed * update_interval
 
 servo.angle = angle
+
 print("Servo controller started")
-print("Left: GPIO17 | Right: GPIO27 | Centre: GPIO22")
+print("Hold LEFT or RIGHT to move continuously")
+print("Press CENTRE to return smoothly to 0°")
 print("Press Ctrl+C to stop")
 
 try:
     while True:
-        if left_button.is_pressed:
-            angle -= movement_step
-            angle = max(angle, minimum_angle)
+        moved = False
 
-            servo.angle = angle
-            print(f"\rAngle: {angle}°   ", end="", flush=True)
+        if left_button.is_pressed and not right_button.is_pressed:
+            angle = max(minimum_angle, angle - movement_step)
+            moved = True
 
-        elif right_button.is_pressed:
-            angle += movement_step
-            angle = min(angle, maximum_angle)
-
-            servo.angle = angle
-            print(f"\rAngle: {angle}°   ", end="", flush=True)
+        elif right_button.is_pressed and not left_button.is_pressed:
+            angle = min(maximum_angle, angle + movement_step)
+            moved = True
 
         elif centre_button.is_pressed:
-            angle = 0
+            # Move smoothly toward zero
+            if angle > movement_step:
+                angle -= movement_step
+            elif angle < -movement_step:
+                angle += movement_step
+            else:
+                angle = 0.0
+
+            moved = True
+
+        if moved:
             servo.angle = angle
+            print(
+                f"\rAngle: {angle:6.1f}°",
+                end="",
+                flush=True
+            )
 
-            print("\rAngle: 0°   ", end="", flush=True)
-
-        sleep(0.08)
+        sleep(update_interval)
 
 except KeyboardInterrupt:
     print("\nServo controller stopped")
